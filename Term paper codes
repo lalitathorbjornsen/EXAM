@@ -1,0 +1,877 @@
+
+#--------------------------------------------
+# pakker
+#library
+library(tidyverse)
+library(readr)
+library(ggplot2)
+library(ggthemes) #more themes for ggplot
+#For world map
+library(rnaturalearth)
+library(sf)
+library(viridis)
+library(zoo)
+library(ggrepel)
+#data 
+raw <- read_csv("Downloads/owid-covid-data.csv", show_col_types = FALSE)
+df <- raw
+
+#for å sjekke alle variablene
+names(df)
+#for å sjekke alle unike variabler i kolloner
+unique(df$continent)
+
+#Dato i riktig format
+df$date <- as.Date(df$date)
+df <- df %>%
+  mutate(year = format(as.Date(date), "%Y"))
+
+#-------------------------------------------
+#Total cases i kontinenter/regioner
+
+#gjennomsnitt per kontinent per år
+df_avergae_new_casea_regions <- df %>%
+  group_by(continent, year) %>%                    # sortere etter kontinent og år
+  summarize(avg_new_cases = mean(new_cases, na.rm = TRUE)) %>%  # Beregn gjennomsnitt
+  drop_na(continent) %>%                                # Fjern rader uten kontinentinformasjon
+  ggplot(., aes(x = year, y = avg_new_cases, color = continent, group = continent)) +
+  geom_line(size = 1) +                            # Tegn linjer
+  geom_point() +                                   # Legg til punkter
+  labs(title = "Average new COVID-19 cases",
+       x = "Year",
+       y = "Average new cases",
+       color = "Regions") +
+  theme_fivethirtyeight() +                                # Minimalistisk tema
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotér x-aksen etiketter
+df_avergae_new_casea_regions
+
+# Månedlig
+df_avergae_new_casea_regions_month <- df %>%        # Lag en månedskolonne i formatet "YYYY-MM"
+  group_by(continent, month) %>%                     # Sortere etter kontinent og måned
+  summarize(avg_new_cases = mean(new_cases, na.rm = TRUE)) %>%  # Beregn gjennomsnitt
+  drop_na(continent) %>%                             # Fjern rader uten kontinentinformasjon
+  ggplot(aes(x = month, y = avg_new_cases, color = continent, group = continent)) +
+  geom_line(size = 1) +                             # Tegn linjer
+  geom_point() +                                    # Legg til punkter
+  labs(title = "Average monthly new COVID-19 cases",
+       x = "Month",                                 # Bruker "Month" i stedet for "Year"
+       y = "Average new cases",
+       color = "Regions") +
+  theme_fivethirtyeight() +                                 # Minimalistisk tema (kan endres til theme_fivethirtyeight() hvis ggthemes er installert)
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotér x-aksen etiketter
+df_avergae_new_casea_regions_month
+
+#---------------------------------------------
+#Se på topp 10 lamd samlet nye caser / må endre slik at man fokusere land og ikke regioner
+
+#Sum de nye caser per land
+df_country_new_cases <- df %>%
+  group_by(location) %>%
+  summarise(total_new_cases = sum(new_cases, na.rm = TRUE)) %>%
+  filter(!(location %in% c("World", "High-income countries", "Asia", "Europe", 
+                           "Upper-middle-income countries", "European Union (27)", 
+                           "North America", "Lower-middle-income countries", 
+                           "South America"))) %>%
+  arrange(desc(total_new_cases)) %>%
+  slice(1:10)  # Velg de 10 landene med høyest nye tilfeller
+
+unique(df_country_new_cases$location)
+
+# Filtrer for de 10 landene med høyest nye tilfeller
+df_top_10_new_cases <- df %>%
+  filter(location %in% df_country_new_cases$location) %>%
+  
+  # Lag linjediagram for utviklingen av nye COVID-19 tilfeller for de 10 landene
+  ggplot(. , aes(x = date, y = new_cases, color = location, group = location)) +
+  geom_line(size = 1) +
+  labs(title = "Development of New COVID-19 Cases for Top 10 Countries",
+       x = "Date",
+       y = "New COVID-19 Cases", 
+       color = "Country") +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = label_comma())  
+df_top_10_new_cases
+#---------------------------
+
+#hver regiom
+# Filtrer og aggregere data per kontinent
+p_continent <- df %>%
+  filter(!is.na(continent)) %>%  # Fjern rader uten kontinent
+  group_by(continent, date) %>%
+  summarize(avg_new_cases = mean(new_cases, na.rm = TRUE)) %>%
+  drop_na() %>%
+  # Lag graf uten punkter,
+  ggplot(., aes(x = date, y = avg_new_cases, color = continent, group = continent)) +
+  geom_line(size = 1) +
+  labs(title = "Average new COVID-19 cases",
+       x = "Date", y = "Average new cases") +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~ continent, scales = "free_y")  
+p_continent
+
+# sum mean(new_cases)
+p_continent2 <- df %>%
+  filter(!is.na(continent)) %>%  # Fjern rader uten kontinent
+  group_by(continent, date) %>%
+  summarize(avg_new_cases = mean(new_cases, na.rm = TRUE)) %>%
+  drop_na() %>%
+  # Lag graf uten punkter, kun linjer
+  ggplot(., aes(x = date, y = avg_new_cases, color = continent, group = continent)) +
+  geom_line(size = 1) +
+  labs(title = "Average daily new COVID-19 cases",
+       x = "Date", y = "Average new cases") +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~ continent, scales = "free_y", ncol = 1) + 
+  scale_x_date(date_breaks = "6 months", date_labels = "%b %Y")  
+p_continent2
+
+#-------------------------------
+#Nye tilfeller
+
+# Filtrer og tilrettelegg data per kontinent
+df_continent <- df %>%
+  filter(!is.na(continent)) %>%  
+  ggplot(., aes(x = date, y = new_cases, color = continent, group = continent)) +
+  geom_line(size = 1) + 
+  labs(title = "New COVID-19 cases",
+       x = "Ye<r", y = "New cases") +
+  theme_fivethirtyeight() +  
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  
+  facet_wrap(~ continent, scales = "free_y") +  
+  scale_y_continuous(labels = scales::label_comma())  # Vis tall uten vitenskapelig notasjon
+df_continent
+
+
+
+#---------------------------------
+#topp 10 kand
+
+#For de 10 landene med flest nye tilfeller
+df_top10 <- df %>%
+  filter(!is.na(continent) & !is.na(location)) %>%  
+  group_by(continent, location) %>%
+  summarise(total_new_cases = sum(new_cases, na.rm = TRUE), .groups = 'drop') %>%
+  group_by(continent) %>%
+  slice_max(order_by = total_new_cases, n = 10) %>% 
+  ungroup()
+
+
+# Filtrer den opprinnelige dataen for de 10 landene med flest nye tilfeller
+p_top10_full <- df %>%
+  filter(location %in% df_top10$location) %>%
+  ggplot(., aes(x = date, y = new_cases, color = location, group = location)) +
+  geom_line(size = 1) +  
+  labs(title = "Top 10 countries with highest new COVID-19 cases in each continent",
+       x = "Date", y = "New cases", color = "Country") +
+  theme_fivethirtyeight() +  
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  
+  facet_wrap(~ continent, scales = "free_y") +  
+  scale_y_continuous(labels = scales::label_comma())
+p_top10_full
+
+#endre utseende
+
+#-------------------------------------------------
+#Lage grafen for hvert kontinent
+
+# Inkludere kontinent og land, og summerer nye tilfeller for hvert land
+df_continent_top10 <- df %>%
+  filter(!is.na(continent) & !is.na(location)) %>%
+  group_by(continent, location) %>%
+  summarise(total_new_cases = sum(new_cases, na.rm = TRUE), .groups = 'drop') %>%
+  group_by(continent) %>%
+  slice_max(order_by = total_new_cases, n = 10) %>% 
+  ungroup()
+
+#For de 10 landene med flest nye tilfeller per kontinent
+df_top10_full <- df %>%
+  filter(location %in% df_continent_top10$location)
+
+# Europe 
+df_europe <- df_top10_full %>%
+  filter(continent == "Europe") %>%
+  ggplot(., aes(x = date, y = new_cases, color = location, group = location)) +
+  geom_line(size = 1) +
+  labs(title = "Top 10 countries with highest new COVID-19 cases in Europe",
+       x = "Date", y = "New cases") +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = scales::label_comma())  # Tall uten vitenskapelig notasjon
+df_europe
+
+# Asia
+df_asia <- df_top10_full %>%
+  filter(continent == "Asia") %>%
+  ggplot(., aes(x = date, y = new_cases, color = location, group = location)) +
+  geom_line(size = 1) +
+  labs(title = "Top 10 countries with highest new COVID-19 cases in Asia",
+       x = "Date", y = "New cases") +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = scales::label_comma())
+df_asia
+
+# Afrika
+df_africa <- df_top10_full %>%
+  filter(continent == "Africa") %>%
+  ggplot(., aes(x = date, y = new_cases, color = location, group = location)) +
+  geom_line(size = 1) +
+  labs(title = "Top 10 countries with highest new COVID-19 cases in Africa",
+       x = "Date", y = "New cases") +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = scales::label_comma())
+df_africa
+
+# Sør-Amerika
+df_south_america <- df_top10_full %>%
+  filter(continent == "South America") %>%
+  ggplot(., aes(x = date, y = new_cases, color = location, group = location)) +
+  geom_line(size = 1) +
+  labs(title = "Top 10 countries with highest new COVID-19 cases in South America",
+       x = "Date", y = "New cases") +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = scales::label_comma())
+df_south_america
+
+# Nord Amerika
+df_north_america <- df_top10_full %>%
+  filter(continent == "North America") %>%
+  ggplot(., aes(x = date, y = new_cases, color = location, group = location)) +
+  geom_line(size = 1) +
+  labs(title = "Top 10 countries with highest new COVID-19 cases in North America",
+       x = "Date", y = "New cases") +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = scales::label_comma())
+df_north_america
+
+# - Oceania
+df_oceania <- df_top10_full %>%
+  filter(continent == "Oceania") %>%
+  ggplot(., aes(x = date, y = new_cases, color = location, group = location)) +
+  geom_line(size = 1) +
+  labs(title = "Top 10 countries with highest new COVID-19 cases in Oceania",
+       x = "Date", y = "New cases") +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = scales::label_comma())
+df_oceania
+
+#....................................
+# totale tester 
+p_total_tests <- df %>%
+  group_by(continent) %>%
+  summarise(total_tests = sum(total_tests, na.rm = TRUE)) %>%  
+  drop_na(continent) %>%  
+  ggplot(., aes(x = continent, y = total_tests, fill = continent)) +
+  geom_bar(stat = "identity", show.legend = FALSE) + 
+  labs(title = "Total Positive COVID-19 Tests per Continent",
+       x = "Continent",
+       y = "Total Positive Tests") +
+  theme_fivethirtyeight() +
+  scale_y_continuous(labels = scales::label_comma()) 
+p_total_tests
+
+#positiv rate vs gdp
+
+positive_rate <- df %>%
+  select(location, date, year, gdp_per_capita, positive_rate) %>%
+  drop_na() %>%
+  group_by(location, year) %>%
+  summarise(
+    positive_rate = mean(positive_rate, na.rm = TRUE),  # Gjennomsnittlig positiv rate per år og land
+    gdp_per_capita = mean(gdp_per_capita, na.rm = TRUE)  # Gjennomsnittlig GDP per capita per år og land
+  ) %>%
+  drop_na() %>%
+  ggplot(., aes(x = gdp_per_capita, y = positive_rate)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +  # Legg til en lineær regresjonslinje
+  labs(title = " GDP per Capita vs Positive Rate",
+       x = "GDP per Capita",
+       y = "Positive Rate") +
+  theme_fivethirtyeight()  
+positve_rate
+
+#----------------------------------------
+# nye dødfall vs nye caser
+df_new_death_new_case <- df %>%
+  group_by(date) %>%  
+  summarise(total_new_cases = sum(new_cases, na.rm = TRUE),  
+            total_new_deaths = sum(new_deaths, na.rm = TRUE)) %>%  
+  drop_na() %>%
+  ggplot(.) +
+  geom_line(aes(x = date, y = total_new_cases, color = "New Cases"), size = 1) +  
+  geom_line(aes(x = date, y = total_new_deaths, color = "New Deaths"), size = 1) +  #
+  labs(title = "New COVID-19 Cases and Deaths Over Time",
+       x = "Date",
+       y = "Count",
+       color = "Category") +  
+  scale_color_manual(values = c("New Cases" = "blue", "New Deaths" = "red")) +  
+  theme_fivethirtyeight() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+df_new_death_new_case 
+
+df_new_death_new_case2 <- df %>%
+  group_by(date) %>%
+  summarise(total_new_cases = sum(new_cases, na.rm = TRUE),
+            total_new_deaths = sum(new_deaths, na.rm = TRUE)) %>%
+  drop_na() %>%
+  mutate(
+    avg_new_cases = zoo::rollmean(total_new_cases, 7, fill = NA),
+    avg_new_deaths = zoo::rollmean(total_new_deaths, 7, fill = NA)
+  ) %>%
+  ggplot(.) +
+  geom_line(aes(x = date, y = avg_new_cases, color = "New Cases (7-day avg)"), size = 1) +  # Linje for nye tilfeller
+  geom_line(aes(x = date, y = avg_new_deaths, color = "New Deaths (7-day avg)"), size = 1) +  # Linje for dødsfall
+  scale_color_manual(values = c("New Cases (7-day avg)" = "blue", "New Deaths (7-day avg)" = "red")) +
+  labs(title = "7-Day Average of New COVID-19 Cases and Deaths",
+       x = "Date", y = "Count", color = "Category") +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+df_new_death_new_case2
+
+#total new deaths for each date for each continent
+df_new_deaths_only <- df %>%
+  mutate(date = as.Date(date)) %>%
+  group_by(continent, date) %>%
+  summarise(total_new_deaths = sum(new_deaths, na.rm = TRUE), .groups = 'drop') %>%
+  drop_na() %>%
+  ggplot(.) +
+  geom_line(aes(x = date, y = total_new_deaths, color = "New Deaths"), size = 1) +  
+  labs(title = "New COVID-19 Deaths Over Time by Continent",
+       x = "Date",
+       y = "New Deaths",
+       color = "Category") +  # Title and labels
+  scale_color_manual(values = c("New Deaths" = "red")) +  
+  facet_wrap(~ continent, scales = "free_y") +  
+  theme_fivethirtyeight() +  
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+
+#total new cases and new deaths per date
+df_cases_deaths <- df %>%
+  mutate(date = as.Date(date)) %>%
+  group_by(date) %>%
+  summarise(total_new_cases = sum(new_cases, na.rm = TRUE),
+            total_new_deaths = sum(new_deaths, na.rm = TRUE)) %>%
+  drop_na() %>% 
+  ggplot(., aes(x = date)) +
+  geom_line(aes(y = total_new_cases, color = "New Cases"), size = 1) +  
+  geom_line(aes(y = total_new_deaths, color = "New Deaths"), size = 1) +  
+  labs(title = "New COVID-19 Cases and Deaths Over Time",
+       x = "Date",
+       y = "Count",
+       color = "Category") + 
+  scale_color_manual(values = c("New Cases" = "blue", "New Deaths" = "red")) +  
+  theme_fivethirtyeight() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+df_cases_deaths
+
+
+df_cfr_continent <- df %>%
+  group_by(continent, year) %>%
+  summarise(total_new_cases = sum(new_cases, na.rm = TRUE),
+            total_new_deaths = sum(new_deaths, na.rm = TRUE)) %>%
+  drop_na() %>%  # Fjern NA-verdier for å unngå feil i beregningen
+  mutate(CFR = (total_new_deaths / total_new_cases) * 100)  # Beregn CFR
+
+
+df_cfr <- df_cfr_continent %>%
+  ggplot(., aes(x = year, y = CFR, color = continent, group = continent)) +
+  geom_line(size = 1.2) +  # Linje for utviklingen av CFR
+  geom_point(size = 2) +   # Punkt for hvert år
+  labs(title = "Case Fatality Rate (CFR) in % over time",
+       x = "Year", y = "CFR (%)",
+       color = "Continent") +
+  scale_color_brewer(palette = "Set2") +  # Farger for kontinenter
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+df_cfr
+
+df_cfr <- df_cfr_continent %>%
+  filter(year != 2024) %>%
+  ggplot(., aes(x = year, y = CFR, color = continent, group = continent)) +
+  geom_line(size = 1.2) + 
+  geom_point(size = 2) +  
+  labs(title = "Case Fatality Rate (CFR) in % over time",
+       x = "Year", y = "CFR (%)",
+       color = "Continent") +
+  scale_color_brewer(palette = "Set2") + 
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+df_cfr
+
+# Summarize total new deaths by year
+df_new_deaths_year <- df %>%
+  mutate(year = as.integer(format(as.Date(date), "%Y"))) %>%  
+  group_by(year) %>%
+  summarise(total_new_deaths = sum(new_deaths, na.rm = TRUE))  %>%
+  ggplot(._year, aes(x = year, y = total_new_deaths)) +
+  geom_line(color = "red", size = 1) +  
+  geom_point(color = "red", size = 2) + 
+  labs(title = "New COVID-19 Death Cases Over Years",
+       x = "Year",
+       y = "Total New Death Cases") +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  scale_y_continuous(labels = scales::label_comma())  
+df_new_deaths_year
+
+
+# Summarize total new deaths by year and continent
+df_new_deaths_continent <- df %>%
+  group_by(year, continent) %>%
+  summarise(total_new_deaths = sum(new_deaths, na.rm = TRUE), .groups = 'drop') %>%  
+  filter(!is.na(total_new_deaths), !is.na(continent)) %>%
+  drop_na(total_new_deaths) %>%
+  ggplot(., aes(x = year, y = total_new_deaths, color = continent, group = continent)) +
+  geom_line(size = 1) +  # Line for new deaths
+  geom_point(size = 2) +  # Points for each data point
+  labs(title = "New COVID-19 Death Cases Over Years by Continent",
+       x = "Year",
+       y = "Total New Death Cases",
+       color = "Continent") +
+  scale_color_manual(values = c("blue", "red", "green", "orange", "purple", "brown", "pink")) +  # Customize colors
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for clarity
+df_new_deaths_continent
+
+#dødsfall i ulike continenter
+# Filtrere og aggregere data per kontinent og dato
+df_continent_deaths <- df %>%
+  filter(!is.na(continent)) %>%  # Fjern rader uten kontinent
+  group_by(continent, date) %>%  # Gruppere dataene etter kontinent og dato
+  summarise(total_new_deaths = sum(new_deaths, na.rm = TRUE)) %>%  # Summer nye dødsfall per dato
+  drop_na()  # Fjern NA-verdier
+
+# Lag graf med linjediagram for nye dødsfall per kontinent
+ggplot(df_continent_deaths) +
+  geom_line(aes(x = date, y = total_new_deaths, color = continent, group = continent), size = 1) +  # Linje for nye dødsfall
+  labs(title = "New COVID-19 Deaths Over Time",
+       x = "Date", 
+       y = "New Deaths",
+       color = "Continent") +
+  scale_color_manual(values = c("blue", "red", "green", "purple", "orange", "brown")) +  # Angi farger for hvert kontinent
+  theme_fivethirtyeight() +  # Bruk fivethirtyeight tema
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Juster x-aksen for bedre lesbarhet
+
+
+#-----------------------------------------
+# vaksinering:
+
+# Total vaksinering
+p_total_vaccinated_continent <- df %>%
+  group_by(year, continent) %>%
+  summarise(total_vaccinated = sum(people_vaccinated, na.rm = TRUE), .groups = 'drop') %>%
+  drop_na(continent) %>%
+  ggplot(., aes(x = year, y = total_vaccinated, color = continent, group = continent)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) + 
+  labs(title = "Total People Vaccinated Over the Years" ,
+       x = "Year",
+       y = "Total Vaccinated",
+       color = "Continent") +
+  scale_color_manual(values = c("blue", "red", "green", "orange", "purple", "brown", "pink")) +  #
+  scale_y_continuous(labels = scales::label_comma()) +  
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+p_total_vaccinated_continent
+
+# vaccination rate per year
+p_vaccination_rate_continent <- df %>%
+  group_by(year, continent) %>%
+  summarise(vaccination_rate = sum(people_vaccinated, na.rm = TRUE) / sum(population, na.rm = TRUE), .groups = 'drop') %>%
+  drop_na(vaccination_rate, continent) %>%
+  ggplot(., aes(x = year, y = vaccination_rate, color = continent, group = continent)) +
+  geom_line(size = 1) +  
+  geom_point(size = 2) +  
+  labs(title = "Vaccination Rates",
+       x = "Year",
+       y = "Vaccination Rate",  
+       color = "Continent") +
+  scale_color_manual(values = c("blue", "red", "green", "orange", "purple", "brown", "pink")) + 
+  scale_y_continuous(labels = scales::label_comma()) +  
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+
+#people fully vaccinated rate per year and continent
+p_fully_vaccinated_rate_continent <- df %>%
+  group_by(year, continent) %>%
+  summarise(fully_vaccinated_rate = sum(people_fully_vaccinated, na.rm = TRUE) / sum(population, na.rm = TRUE), .groups = 'drop') %>%
+  drop_na(fully_vaccinated_rate, continent)  %>%
+  ggplot(., aes(x = year, y = fully_vaccinated_rate, color = continent, group = continent)) +
+  geom_line(size = 1) +  
+  geom_point(size = 2) +  
+  labs(title = "People Fully Vaccinated Rate Over the Years by Continent",
+       x = "Year",
+       y = "Fully Vaccinated Rate",  
+       color = "Continent") +
+  scale_color_manual(values = c("blue", "red", "green", "orange", "purple", "brown", "pink")) +  
+  scale_y_continuous(labels = scales::label_comma()) +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+p_fully_vaccinated_rate_continent
+
+# vs land
+df_vaccination_change <- df %>%
+  group_by(year, continent) %>%
+  summarise(fully_vaccinated_rate = sum(people_fully_vaccinated, na.rm = TRUE) / sum(population, na.rm = TRUE), .groups = 'drop') %>%
+  arrange(continent, year) %>%
+  group_by(continent) %>%
+  mutate(change_rate = fully_vaccinated_rate - lag(fully_vaccinated_rate)) %>%
+  drop_na(change_rate) %>%
+  filter(!is.na(continent)) %>%
+  ggplot(., aes(x = year, y = change_rate, color = continent, group = continent)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Annual Change in Fully Vaccinated Rate by Continent",
+       x = "Year",
+       y = "Change in Fully Vaccinated Rate",
+       color = "Continent") +
+  theme_fivethirtyeight() +
+  scale_color_manual(values = c("blue", "red", "green", "orange", "purple", "brown", "pink")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+df_vaccination_change
+
+df_vaccine_vs_deaths <- df %>%
+  group_by(year, continent) %>%
+  summarise(
+    fully_vaccinated_rate = sum(people_fully_vaccinated, na.rm = TRUE) / sum(population, na.rm = TRUE),
+    death_rate = sum(new_deaths, na.rm = TRUE) / sum(population, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  drop_na() %>%
+  ggplot(., aes(x = fully_vaccinated_rate, y = death_rate, color = continent)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm", se = FALSE) +  # Legg til trendlinjer
+  labs(title = "Fully Vaccinated Rate vs Death Rate",
+       x = "Fully Vaccinated Rate",
+       y = "Death Rate",
+       color = "Continent") +
+  theme_minimal() +
+  scale_color_manual(values = c("blue", "red", "green", "orange", "purple", "brown", "pink")) +
+  scale_y_continuous(labels = scales::label_percent()) +
+  scale_x_continuous(labels = scales::label_percent())
+df_vaccine_vs_deaths
+
+
+#fullt vaksinert og gdp
+# Beregn gjennomsnittlig vaksinasjonsrate og GDP per capita per land
+df_vaccine_gdp <- df %>%
+  group_by(location) %>%
+  summarise(
+    avg_fully_vaccinated_rate = sum(people_fully_vaccinated, na.rm = TRUE) / sum(population, na.rm = TRUE),
+    avg_gdp_per_capita = mean(gdp_per_capita, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  drop_na()  # Fjern rader med NA-verdier
+
+# Lag scatterplot
+ggplot(df_vaccine_gdp, aes(x = avg_gdp_per_capita, y = avg_fully_vaccinated_rate)) +
+  geom_point(aes(color = location), size = 3, alpha = 0.7) +  # Punkt for hvert land
+  geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed") +  # Regresjonslinje
+  labs(title = "GDP per Capita vs Fully Vaccinated Rate",
+       x = "GDP per Capita (USD)",
+       y = "Fully Vaccinated Rate (%)",
+       color = "Country") +
+  theme_fivethirtyeight() +
+  scale_y_continuous(labels = scales::label_percent()) +  # Y-akse som prosent
+  scale_x_continuous(labels = scales::label_comma()) +  # X-akse med kommaformatering
+  theme(legend.position = "none")  # Skjul legenden for land (for oversiktlighet)
+
+
+# Beregn gjennomsnittlig vaksinasjonsrate og GDP per capita per land
+df_vaccine_gdp <- df %>%
+  group_by(location) %>%
+  summarise(
+    avg_fully_vaccinated_rate = sum(people_fully_vaccinated, na.rm = TRUE) / sum(population, na.rm = TRUE),
+    avg_gdp_per_capita = mean(gdp_per_capita, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  drop_na()  # Fjern rader med NA-verdier
+
+# Lag scatterplot med etiketter
+ggplot(df_vaccine_gdp, aes(x = avg_gdp_per_capita, y = avg_fully_vaccinated_rate)) +
+  geom_point(size = 3, alpha = 0.7, color = "blue") +  # Punkter
+  geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed") +  
+  geom_text_repel(aes(label = location), size = 3, max.overlaps = 10) + 
+  labs(title = "GDP per Capita vs Fully Vaccinated Rate",
+       x = "GDP per Capita (USD)",
+       y = "Fully Vaccinated Rate (%)") +
+  theme_fivethirtyeight() +
+  scale_y_continuous(labels = scales::label_percent()) +  
+  scale_x_continuous(labels = scales::label_comma())  
+
+
+#--------------------
+#Demography
+
+# Filtrer ut NA-verdier for de nødvendige variablene
+df_avg_rate <- df %>%
+  filter(!is.na(population_density) & !is.na(positive_rate)) %>%
+  group_by(location) %>%  
+  summarise(
+    avg_positive_rate = mean(positive_rate, na.rm = TRUE),
+    avg_population_density = mean(population_density, na.rm = TRUE)
+  )
+
+# Scatterplot med gjennomsnitt
+p_positivity <- ggplot(df_avg_rate, aes(x = avg_population_density, y = avg_positive_rate)) +
+  geom_point(alpha = 0.6, color = "blue", size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkblue") +
+  geom_text_repel(aes(label = location), size = 3, max.overlaps = 10) +  
+  labs(
+    title = "Average Population Density vs. Average Positivity Rate",
+    x = "Average Population Density (per km²)",
+    y = "Average Positivity Rate (%)"
+  ) +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  xlim(0, 1000)  # Begrens x-aksen til 0-4000
+
+p_positivity
+
+#-----------
+#inntekt
+df_income_analysis <- df %>%
+  filter(location %in% c("High-income countries", 
+                         "Upper-middle-income countries", 
+                         "Lower-middle-income countries"),
+         !is.na(people_fully_vaccinated), !is.na(population)) %>%
+  mutate(
+    vaccination_rate = (people_fully_vaccinated / population) * 100
+  )
+
+# 1. Vaksinasjonsutrulling per inntektsnivå
+p_vaccine_rollout_income <- df_income_analysis %>%
+  group_by(location, date) %>%
+  summarise(avg_vaccination_rate = mean(vaccination_rate, na.rm = TRUE), .groups = 'drop') %>%
+  ggplot(aes(x = date, y = avg_vaccination_rate, color = location, group = location)) +
+  geom_line(size = 1) +
+  labs(title = "Vaccination Rollout by Income Level",
+       x = "Year", y = "Vaccination Rate (%)",
+       color = "Income Level") +
+  theme_fivethirtyeight() +
+  scale_color_manual(values = c("High-income countries" = "blue",
+                                "Upper-middle-income countries" = "green",
+                                "Lower-middle-income countries" = "red"))
+
+p_vaccine_rollout_income
+
+# Beregn vaksinasjonsrate og filtrer data
+## Filtrer og beregn vaksinasjonsrate per kontinent
+# Filtrer data og fjern NA-verdier
+df_gdp_vaccine_continent <- df %>%
+  filter(!is.na(gdp_per_capita), 
+         !is.na(people_fully_vaccinated), 
+         !is.na(population), 
+         !is.na(continent), 
+         people_fully_vaccinated <= population, 
+         !continent %in% c("World", "High-income countries", 
+                           "Upper-middle-income countries", 
+                           "Lower-middle-income countries")) %>%
+  mutate(vaccination_rate = (people_fully_vaccinated / population) * 100)
+
+# plot
+p_gdp_vaccine_continent <- ggplot(df_gdp_vaccine_continent, 
+                                  aes(x = gdp_per_capita, 
+                                      y = vaccination_rate, 
+                                      color = continent)) +
+  geom_point(alpha = 0.6, size = 2) +  
+  geom_smooth(method = "lm", se = FALSE, linetype = "dashed", size = 1) + 
+  facet_wrap(~continent, scales = "free") +  
+  labs(title = "Relationship Between GDP per Capita and Vaccination Rate by Continent",
+       x = "GDP per Capita (USD)",
+       y = "Vaccination Rate (%)",
+       color = "Continent") +
+  scale_y_continuous(labels = scales::label_percent(scale = 1)) + 
+  scale_x_continuous(labels = scales::label_comma()) +  
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+p_gdp_vaccine_continent
+
+# Beregn fully_vaccinated_rate for hvert land
+df <- df %>%
+  mutate(fully_vaccinated_rate = (people_fully_vaccinated / population) * 100) %>%
+  drop_na(fully_vaccinated_rate)
+
+df_avg_vaccinated <- df %>%
+  group_by(location) %>%
+  summarise(
+    avg_fully_vaccinated_rate = mean(fully_vaccinated_rate, na.rm = TRUE), 
+    gdp_per_capita = mean(gdp_per_capita, na.rm = TRUE)  
+  ) %>%
+  drop_na() %>%
+  ggplot(., aes(x = gdp_per_capita, y = fully_vaccinated_rate)) +
+  geom_point(alpha = 0.6, color = "blue", size = 2) +  
+  geom_smooth(method = "lm", se = FALSE, color = "darkblue") +  
+  geom_text_repel(aes(label = location), size = 3, max.overlaps = 10) +  
+  labs(
+    title = "GDP per Capita vs Fully Vaccinated Rate",
+    x = "GDP per Capita (USD)",
+    y = "Fully Vaccinated Rate (%)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+df_avg_vaccinated 
+
+
+# fully_vaccinated_rate for hvert land
+df <- df %>%
+  mutate(fully_vaccinated_rate = (people_fully_vaccinated / population) * 100) %>%
+  drop_na(fully_vaccinated_rate)
+
+# gjennomsnitt av fully_vaccinated_rate for hvert land
+df_avg_vaccinated <- df %>%
+  group_by(location) %>%
+  summarise(
+    avg_fully_vaccinated_rate = mean(fully_vaccinated_rate, na.rm = TRUE), 
+    gdp_per_capita = mean(gdp_per_capita, na.rm = TRUE)  
+  ) %>%
+  drop_na()
+
+#Gjennomsnittlig vaksinering og GDP per capita
+p_gdp_vs_vaccination <- ggplot(df_avg_vaccinated, aes(x = gdp_per_capita, y = avg_fully_vaccinated_rate)) +
+  geom_point(alpha = 0.6, color = "blue", size = 2) +  
+  geom_smooth(method = "lm", se = FALSE, color = "darkblue") +
+  geom_text_repel(aes(label = location), size = 3, max.overlaps = 10) +  
+  labs(
+    title = "GDP per Capita vs Fully Vaccinated Rate",
+    x = "GDP per Capita (USD)",
+    y = "Fully Vaccinated Rate (%)"
+  ) +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+
+p_gdp_vs_vaccination
+
+#------------------
+# Kart data
+
+#totale caser
+
+# Velg topp 10 land basert på total_cases
+top_countries <- df %>%
+  group_by(location) %>%
+  summarise(total_cases = sum(new_cases, na.rm = TRUE)) %>%
+  arrange(desc(total_cases)) %>%
+  slice_head(n = 10) %>%
+  pull(location)
+
+p_nye_tilfeller_topp10 <- df %>%
+  filter(location %in% top_countries) %>%
+  ggplot(aes(x = date, y = new_cases, col = location)) + 
+  geom_line() +
+  scale_y_continuous(labels = scales::number_format()) + 
+  theme_classic() +
+  theme(legend.position = "bottom") +  
+  labs(
+    title = "Nye COVID-19 tilfeller for topp 10 land med flest tilfeller",
+    x = "Dato",
+    y = "Nye tilfeller",
+    col = "Land"
+  )
+
+p_nye_tilfeller_topp10 
+
+
+p_continent <- df %>%
+  filter(!is.na(continent)) %>%  
+  ggplot(aes(x = date, y = new_cases, col = continent)) + 
+  geom_line(aes(group = location), alpha = 0.7) + 
+  scale_y_continuous(labels = scales::number_format()) + 
+  theme_classic() +
+  facet_wrap(~ continent, scales = "free_y") + 
+  labs(
+    title = "Nye COVID-19 tilfeller per kontinent over tid",
+    x = "Dato",
+    y = "Nye tilfeller",
+    col = "Kontinent"
+  )
+p_continent
+
+# forventet levealder per år og kontinent
+df_life_expectancy_continent <- df %>%
+  group_by(year, continent) %>%
+  summarise(avg_life_expectancy = mean(life_expectancy, na.rm = TRUE)) %>%
+  drop_na()
+
+# kontinent over tid
+ggplot(df_life_expectancy_continent, aes(x = year, y = avg_life_expectancy, color = continent, group = continent)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Average Life Expectancy Over Time",
+       x = "Year",
+       y = "Average Life Expectancy (Years)",
+       color = "Continent") +
+  theme_fivethirtyeight() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#----------------------------------
+
+df <- df %>%
+  mutate(time = as.numeric(difftime(date, min(date), units = "days")))  # Create a 'time' variable as days from the start
+
+# regression model
+model <- lm(new_cases ~ time, data = df)
+
+summary(model)
+
+
+#Kart
+# World map
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+country_data <- df %>%
+  group_by(location) %>%
+  summarise(total_cases = sum(new_cases, na.rm = TRUE)) %>%
+  rename(country = location)
+
+# Endre navnet på USA i country_data til "United States of America"
+country_data <- country_data %>%
+  mutate(country = case_when(
+    country == "United States" ~ "United States of America",  
+    TRUE ~ country
+  ))
+
+# Gjør det samme i world-datasettet for å matche "United States"
+world <- world %>%
+  mutate(name = case_when(
+    name == "United States" ~ "United States of America",  
+    TRUE ~ name
+  ))
+
+# Koble kartdata med COVID-19 data 
+world_data <- world %>%
+  left_join(country_data, by = c("name" = "country"))
+
+map <- ggplot(world_data) +
+  geom_sf(aes(fill = total_cases), color = "white", size = 0.2) +  # Hvite kantlinjer rundt landene
+  scale_fill_gradient2(low = "beige", high = "red", na.value = "grey80", midpoint = median(world_data$total_cases, na.rm = TRUE)) +
+  theme_fivethirtyeight(base_size = 12) +  
+  theme(
+    legend.position = "bottom",  
+    legend.title = element_text(size = 12, face = "bold"),  
+    legend.text = element_text(size = 10),  
+    axis.text = element_text(size = 10),  
+    plot.title = element_text(size = 16, face = "bold"),  
+    plot.caption = element_text(size = 10),  
+    axis.title = element_text(size = 12)  
+  ) +
+  labs(
+    title = "Total COVID-19 Cases by Country",
+    fill = "Number of Cases",
+    caption = "Data Source: Our World in Data"
+  ) + 
+  scale_y_continuous(labels = scales::label_comma()) +  
+  scale_x_continuous(labels = scales::label_comma()) +  
+  scale_fill_continuous(labels = scales::label_comma())  
+
+map
